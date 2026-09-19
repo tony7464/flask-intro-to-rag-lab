@@ -7,6 +7,11 @@ from lib.company_documents import COMPANY_DOCUMENTS
 from lib.rag_service import build_prompt, retrieve_context, source_metadata
 
 
+NO_CONTEXT_ANSWER = (
+    "The approved company documents do not contain enough information to answer that question."
+)
+
+
 def create_app():
     app = Flask(__name__)
 
@@ -28,8 +33,40 @@ def create_app():
         7. Return query, answer, and sources as JSON.
         8. If generate_response raises RuntimeError, return a 503 service error.
         """
-        # TODO: Replace this placeholder response with your implementation.
-        return jsonify({"message": "TODO: implement /api/ask"}), 501
+        payload = request.get_json(silent=True) or {}
+        query = payload.get("query")
+
+        if not isinstance(query, str) or not query.strip():
+            return jsonify({"error": "A non-empty query string is required."}), 400
+
+        query = query.strip()
+        context_matches = retrieve_context(query, COMPANY_DOCUMENTS)
+
+        if not context_matches:
+            return jsonify(
+                {
+                    "query": query,
+                    "answer": NO_CONTEXT_ANSWER,
+                    "sources": [],
+                }
+            )
+
+        prompt = build_prompt(query, context_matches)
+
+        try:
+            answer = generate_response(prompt)
+        except RuntimeError:
+            return jsonify(
+                {"error": "The model service is unavailable. Please try again later."}
+            ), 503
+
+        return jsonify(
+            {
+                "query": query,
+                "answer": answer,
+                "sources": [source_metadata(match) for match in context_matches],
+            }
+        )
 
     return app
 
